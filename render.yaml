@@ -41,7 +41,7 @@ services:
   # ----------------------------------------------------------------------------
   # 2. Frontend Single Page Application (React 18 + Vite + Tailwind CSS)
   # ----------------------------------------------------------------------------
- - type: web
+  - type: web
     name: skillswap-client
     runtime: static
     branch: main
