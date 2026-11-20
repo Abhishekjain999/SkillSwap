@@ -42,6 +42,43 @@ export const protect = async (req, res, next) => {
   }
 };
 
+export const protectOptional = async (req, res, next) => {
+  let token;
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    req.user = { _id: 'guest', name: 'Guest User', role: 'GUEST' };
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'skillswap_super_secret_jwt_key_2026_xyz');
+    const user = await User.findById(decoded.id).select('-password');
+
+    if (!user) {
+      req.user = { _id: 'guest', name: 'Guest User', role: 'GUEST' };
+      return next();
+    }
+
+    if (user.status === 'SUSPENDED') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Please contact support.'
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: 'Not authorized, invalid or expired token'
+    });
+  }
+};
+
 export const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === 'ADMIN') {
     next();

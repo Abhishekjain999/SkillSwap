@@ -68,9 +68,10 @@ The centerpiece of SkillSwap:
   - Share full desktop, window, or specific browser tab.
   - Seamlessly restores camera video stream upon stopping screen share without tearing down the peer connection.
 - **Collaborative Monaco Code Editor:**
-  - Multi-language support: JavaScript, TypeScript, Python, Java, C++, HTML.
+  - Multi-language support: JavaScript (Node.js LTS), Python 3.12, Java (OpenJDK 21), C++ (GCC C++17).
   - Real-time peer code synchronization via Socket.IO.
-  - Sandboxed execution runner with built-in output terminal console.
+  - **Isolated Docker-Based Execution Engine:** Runs code inside hardened, disposable Docker containers with strict CPU, memory, process limits, and network isolation.
+  - Interactive Standard Input (stdin) panel, runtime duration tracking, and compilation vs. runtime diagnostics.
 - **Collaborative Whiteboard Canvas:**
   - HTML5 canvas with pencil, eraser, color palette, stroke width, and board clearing.
   - Real-time peer drawing synchronization.
@@ -98,9 +99,11 @@ The centerpiece of SkillSwap:
 | Layer | Technologies |
 |---|---|
 | **Frontend** | React 18, Vite, Tailwind CSS, React Router v6, Axios, Socket.IO Client, Monaco Editor (`@monaco-editor/react`), Lucide React, Recharts, Canvas Confetti |
-| **Backend** | Node.js, Express.js, MongoDB, Mongoose, Socket.IO, JWT, bcryptjs, Multer, Helmet, CORS, Morgan |
+| **Backend** | Node.js, Express.js, MongoDB, Mongoose, Socket.IO, JWT, bcryptjs, Multer, Helmet, CORS, Morgan, Express Rate Limit |
 | **Real-Time** | Socket.IO (WebRTC signaling, chat, code sync, whiteboard sync, presence) |
 | **Media Stream** | WebSockets for WebRTC signaling; Direct P2P `RTCPeerConnection` for video, audio, and screen sharing |
+| **Code Execution** | Isolated Docker Containers, Docker CLI Orchestrator, Extensible Multi-Language Executor Architecture |
+| **Containers** | Docker, Docker Compose, Multi-stage Dockerfiles, Hardened Runtime Sandboxes |
 
 ---
 
@@ -111,14 +114,16 @@ SkillSwap/
 ├── client/
 │   ├── src/
 │   │   ├── components/       # Navbar, Footer, NotificationDropdown, MatchScoreBadge, Modals...
-│   │   ├── pages/            # LandingPage, Discover, Dashboard, LearningRoom, Exchanges, Admin...
+│   │   ├── pages/            # LandingPage, Discover, Dashboard, LearningRoom (with Docker Code Runner), Exchanges...
 │   │   ├── context/          # AuthContext, SocketContext
-│   │   ├── services/         # Axios API client (api.js)
+│   │   ├── services/         # Axios API client (api.js, codeAPI)
 │   │   ├── styles/           # Tailwind and custom animations
 │   │   ├── App.jsx           # App routing and protected route wrappers
 │   │   ├── main.jsx          # React DOM entry point
 │   │   └── index.css         # Glassmorphism utilities, dark gradients, typography
 │   ├── index.html
+│   ├── Dockerfile            # Multi-stage production Nginx client image
+│   ├── nginx.conf            # Nginx reverse proxy configuration
 │   ├── package.json
 │   ├── tailwind.config.js
 │   ├── vite.config.js
@@ -126,19 +131,38 @@ SkillSwap/
 │
 ├── server/
 │   ├── config/               # db.js (MongoDB Mongoose connection)
-│   ├── controllers/          # auth, user, matching, exchange, session, contract, admin...
-│   ├── middleware/           # auth.js (JWT protect, adminOnly), upload.js (Multer)
-│   ├── models/               # User, Skill, ExchangeRequest, LearningContract, Session, Review, Report...
-│   ├── routes/               # RESTful API route definitions
-│   ├── services/             # matchingService.js (Weighted scoring engine)
+│   ├── controllers/          # auth, user, codeController, matching, exchange, session...
+│   ├── middleware/           # auth.js (JWT protect, optionalProtect, adminOnly), upload.js (Multer)
+│   ├── models/               # User, Skill, ExchangeRequest, LearningContract, Session, Review...
+│   ├── routes/               # RESTful API route definitions (including /api/code)
+│   ├── services/
+│   │   ├── matchingService.js # Weighted scoring engine
+│   │   └── codeExecution/    # Docker-based execution engine
+│   │       ├── config.js     # Configurable execution & resource limits
+│   │       ├── DockerRunner.js # Secure Docker container runner & concurrency manager
+│   │       ├── ExecutionService.js # End-to-end execution lifecycle manager
+│   │       └── executors/    # BaseExecutor, Python, Java, C++, JavaScript, Registry
 │   ├── sockets/              # Socket.IO signaling, chat, whiteboard, code sync
 │   ├── scripts/              # seed.js (Rich demo database seeder)
+│   ├── tests/                # Automated unit & integration tests (Node native test runner)
 │   ├── uploads/              # Shared session files
+│   ├── Dockerfile            # Server image with Docker CLI client orchestration
 │   ├── server.js             # Express app entry & HTTP server
 │   ├── package.json
 │   └── .env.example
 │
-├── package.json              # Monorepo root scripts
+├── docker/
+│   ├── runners/              # Isolated execution environment Dockerfiles
+│   │   ├── python.Dockerfile # Python 3.12 unprivileged runner
+│   │   ├── java.Dockerfile   # OpenJDK 21 unprivileged runner
+│   │   ├── cpp.Dockerfile    # GCC 13 unprivileged runner
+│   │   └── node.Dockerfile   # Node.js LTS unprivileged runner
+│   ├── pull-runners.sh       # Script to pre-pull runner images (Linux/macOS)
+│   └── pull-runners.bat      # Script to pre-pull runner images (Windows)
+│
+├── docker-compose.yml        # Production-ready full-stack orchestration
+├── .dockerignore
+├── package.json              # Monorepo root scripts & test runners
 └── README.md
 ```
 
@@ -154,6 +178,25 @@ JWT_SECRET=skillswap_super_secret_jwt_key_2026_xyz
 JWT_EXPIRE=30d
 CLIENT_URL=http://localhost:5173
 NODE_ENV=development
+
+# Docker Code Execution Engine Settings
+CODE_EXEC_TIMEOUT_MS=5000          # Maximum execution duration in milliseconds (default: 5000ms)
+CODE_EXEC_MEMORY_LIMIT=256m        # Container RAM limit (default: 256m)
+CODE_EXEC_CPU_LIMIT=1.0            # CPU core allocation limit (default: 1.0)
+CODE_EXEC_PIDS_LIMIT=64            # Maximum spawned processes / threads to mitigate fork bombs
+CODE_EXEC_MAX_OUTPUT_BYTES=1048576 # 1 MB maximum output buffer
+CODE_EXEC_MAX_CODE_SIZE=102400     # 100 KB max source code size
+CODE_EXEC_MAX_STDIN_SIZE=102400    # 100 KB max stdin payload size
+CODE_EXEC_MAX_CONCURRENT=5         # Maximum parallel container executions on host
+DOCKER_CMD=docker                  # Docker CLI command or path
+DOCKER_NETWORK=none                # Completely disables network in execution sandbox
+DOCKER_READONLY_FS=true            # Mount root filesystem as read-only with /tmp tmpfs
+
+# Runtime Docker Images
+DOCKER_IMAGE_PYTHON=python:3.12-slim
+DOCKER_IMAGE_JAVA=openjdk:21-slim
+DOCKER_IMAGE_CPP=gcc:13-bookworm
+DOCKER_IMAGE_NODE=node:20-slim
 ```
 
 ### Client (`client/.env`)
@@ -164,50 +207,233 @@ VITE_SOCKET_URL=http://localhost:5000
 
 ---
 
-## 💻 Getting Started Locally
+## ⚡ Docker-Based Code Execution Engine
+
+SkillSwap features a secure, modular, containerized code execution service that runs arbitrary user-submitted programs inside isolated, ephemeral Docker containers rather than directly on the host machine.
+
+### 1. Supported Languages & Environments
+
+| Language | Canonical Key | Aliases | Runtime Image | Compiler / Interpreter | Standard Entrypoint |
+|---|---|---|---|---|---|
+| **Python** | `python` | `py`, `python3` | `python:3.12-slim` | Python 3.12 | `python -u main.py` |
+| **Java** | `java` | `jdk`, `java21` | `openjdk:21-slim` | OpenJDK 21 (`javac`) | `java -Xmx128m -Xss512k Main` |
+| **C++** | `cpp` | `c++`, `g++`, `cplusplus` | `gcc:13-bookworm` | GCC 13 (`g++ -std=c++17`) | `./solution` |
+| **JavaScript** | `javascript` | `js`, `node`, `nodejs` | `node:20-slim` | Node.js LTS | `node index.js` |
+
+> [!NOTE]
+> Adding a new language is modular: create a class inheriting from `BaseExecutor` in `server/services/codeExecution/executors/` and register it in `ExecutorRegistry.js` without changing the core execution service.
+
+### 2. Execution Lifecycle
+
+```mermaid
+flowchart TD
+    A["Frontend Monaco Editor (Run Code)"] -->|"POST /api/code/execute"| B["codeController.js"]
+    B --> C["Rate Limiter (30 req/min) & Auth"]
+    C --> D["ExecutionService.js: validatePayload()"]
+    D --> E["DockerRunner: checkDockerAvailable()"]
+    E --> F["Create Temporary Workspace Directory (/tmp/exec-*)"]
+    F --> G["Executor: prepareWorkspace() (writes main.py / Main.java / main.cpp / index.js)"]
+    G --> H{"Is Compiled Language? (Java, C++)"}
+    H -->|Yes| I["Compile in Docker Container (javac / g++)"]
+    I -->|Compilation Fails| J["Return status: compilation_error + stderr"]
+    H -->|No / Compile Success| K["Run Program in Docker Container"]
+    K --> L["Pipe Standard Input (stdin)"]
+    K --> M["Enforce Limits: Memory, CPU, PIDs, Timeout, 1MB Output Capping"]
+    L --> N["Capture stdout, stderr, exitCode, duration"]
+    M --> N
+    N --> O["Finally: Clean up container ('docker rm -f') & Workspace Directory ('fs.rm')"]
+    O --> P["Return Structured JSON to Client"]
+    J --> O
+```
+
+### 3. API Reference
+
+#### `POST /api/code/execute`
+Executes submitted source code inside an isolated Docker container.
+
+- **Rate Limit:** 30 requests / minute per IP
+- **Authentication:** Bearer JWT token (optional for demo/testing, verified if present)
+- **Request Body:**
+  ```json
+  {
+    "language": "python",
+    "code": "import sys\nname = sys.stdin.readline().strip()\nprint(f'Hello, {name} from SkillSwap!')",
+    "stdin": "SkillSwapper"
+  }
+  ```
+- **Response Format:**
+  ```json
+  {
+    "success": true,
+    "stdout": "Hello, SkillSwapper from SkillSwap!\n",
+    "stderr": "",
+    "exitCode": 0,
+    "executionTime": 142,
+    "status": "success"
+  }
+  ```
+
+#### Possible `status` Values:
+- `success`: Execution completed with exit code `0`.
+- `compilation_error`: Compilation step (`javac` or `g++`) failed with syntax or symbol errors. Compiler diagnostics are provided in `stderr`.
+- `runtime_error`: Program crashed or exited with a non-zero exit code (e.g. uncaught exception, `ZeroDivisionError`, `NullPointerException`, assertion failure).
+- `timeout_error`: Execution exceeded the maximum duration limit (default: 5 seconds). The container was killed.
+- `system_error`: Docker daemon unreachable, CLI missing, or host environment error.
+
+#### `GET /api/code/languages`
+Returns the list of supported languages, versions, starter templates, and active execution limits.
+
+---
+
+## 🔒 Docker Execution Security Architecture
+
+The execution engine is hardened against malicious code execution, container escape, resource starvation, and denial-of-service:
+
+1. **Complete Network Isolation:** Containers run with `--network none`. Arbitrary code cannot access the internet, intranet, MongoDB, host ports, or internal APIs.
+2. **Resource Constraints:**
+   - Memory capped via `--memory 256m --memory-swap 256m` (OOM killed if exceeded).
+   - CPU quota capped via `--cpus 1.0`.
+   - Process limit enforced via `--pids-limit 64` (mitigates fork bombs and background daemon spawning).
+3. **Execution Timeout:** Strict timer (default: 5s). Upon expiration, `docker kill <containerId>` terminates the container and process group.
+4. **Read-Only Root Filesystem:** Root filesystem mounted with `--read-only` and disposable scratch memory `--tmpfs /tmp:rw,noexec,nosuid,size=32m`.
+5. **Least-Privilege Non-Root Users:** Containers execute under unprivileged users (`1000:1000` / `sandbox` / `node`).
+6. **Workspace Isolation:**
+   - Only the specific temporary directory generated per execution (`/tmp/skillswap-code-exec/exec-*`) is mounted.
+   - Host directories, system binaries, application code, and database volumes are never mounted.
+   - The Docker socket (`/var/run/docker.sock`) is **strictly forbidden** from being mounted inside execution containers.
+   - Zero application environment variables or secrets (`JWT_SECRET`, `MONGODB_URI`) are passed to runner containers.
+7. **Command Injection Immunity:** The Docker runner uses Node.js `child_process.spawn` and `execFile` with explicit argument arrays. Arguments are never interpolated into shell strings.
+8. **Output Buffer Caps:** Streaming output is capped at 1 MB to prevent memory exhaustion from infinite print loops (`while True: print("A")`).
+9. **Strict Language Allowlist:** All language identifiers are checked against the registered executor registry. Arbitrary Docker images cannot be specified by clients.
+10. **Guaranteed Cleanup:** Container removal (`--rm` and `docker rm -f <containerId>`) and temporary workspace removal (`fs.rm(..., { recursive: true, force: true })`) are guaranteed inside `finally` blocks even during crashes, timeouts, or disconnections.
+11. **Concurrency Semaphore & Queueing:** Concurrency is limited to `CODE_EXEC_MAX_CONCURRENT` (default: 5 parallel executions). Requests beyond capacity are queued or rejected with a clean notice.
+
+---
+
+## 🚀 Running SkillSwap with Docker
+
+Deploying SkillSwap with Docker ensures all programming languages and runtimes are pre-packaged without needing to manually install GCC, Python, Java, and Node on the host server.
+
+### 1. Prerequisites
+- **Docker Engine** (v20.10+) or **Docker Desktop** (Linux, Windows with WSL2, or macOS)
+- **Docker Compose** (v2+)
+
+### 2. Pre-Pull Execution Runner Images
+Run the helper script to pre-pull all language runner images in advance:
+
+**Linux / macOS:**
+```bash
+chmod +x docker/pull-runners.sh
+./docker/pull-runners.sh
+```
+
+**Windows (PowerShell or CMD):**
+```cmd
+.\docker\pull-runners.bat
+```
+
+Or manually pull the official images:
+```bash
+docker pull python:3.12-slim
+docker pull openjdk:21-slim
+docker pull gcc:13-bookworm
+docker pull node:20-slim
+```
+
+### 3. Start the Full Platform with Docker Compose
+```bash
+# Build and start all services in detached mode
+docker compose up -d --build
+```
+
+Services started:
+- **`skillswap-server`**: Express API & Socket.IO server on `http://localhost:5000`
+- **`skillswap-client`**: Nginx production SPA on `http://localhost:5173`
+- **`skillswap-mongo`**: MongoDB database on `localhost:27017`
+
+### 4. Stop Services
+```bash
+docker compose down
+```
+
+---
+
+## 💻 Running SkillSwap Locally (Development Mode)
+
+If developing without Docker Compose, you can run the services directly with Node.js and point to your local Docker daemon for code execution.
 
 ### 1. Prerequisites
 - **Node.js** v18+ (tested on Node v24)
 - **MongoDB** running locally on port 27017 (`mongodb://127.0.0.1:27017`)
+- **Docker Desktop / Docker Engine** (running if you want to execute code in Docker)
 
 ### 2. Installation
-From the root directory:
 ```bash
 # Install backend and frontend dependencies
 npm run install:all
 ```
 
-Or individually:
+### 3. Seed Demo Data
+Populates realistic personas, active exchanges, contracts, and learning rooms:
 ```bash
-cd server && npm install
-cd ../client && npm install
-```
-
-### 3. Seed Realistic Demo Data
-Populates skills, realistic user personas, active exchange proposals, contracts, and scheduled learning rooms:
-```bash
-cd server
 npm run seed
 ```
 
-### 4. Running the Application
-Open two terminal tabs:
-
-**Terminal 1 (Backend Server):**
+### 4. Run Development Servers
 ```bash
-cd server
-npm start
-# Server listens on http://localhost:5000
+# Start backend in terminal 1
+npm run dev:server
+
+# Start frontend in terminal 2
+npm run client
 ```
 
-**Terminal 2 (Frontend Client):**
+Open **http://localhost:5173** in your browser.
+
+---
+
+## 🧪 Testing
+
+The execution engine includes a comprehensive test suite utilizing Node.js native test runner (`node:test` and `node:assert`).
+
+### Run All Server Tests
 ```bash
-cd client
-npm run dev
-# Client runs on http://localhost:5173
+npm test
+# Or from server directory:
+cd server && npm test
 ```
 
-Now open **http://localhost:5173** in your browser.
+### Test Coverage Highlights:
+- **Python Execution:** Verified unbuffered output, exit code, stdout capture, and workspace isolation.
+- **Java Execution:** Tested automatic public class name detection, multi-stage `javac` compilation, JVM heap limits (`-Xmx128m`), and runtime output.
+- **C++ Execution:** Tested GCC `g++ -std=c++17` compilation, diagnostic error reporting, and binary execution.
+- **JavaScript Execution:** Tested Node.js LTS execution and stdout/stderr stream capture.
+- **Compilation vs Runtime Errors:** Verified compiler diagnostics are tagged with `status: compilation_error` while runtime crashes receive `status: runtime_error`.
+- **Execution Timeout:** Tested process kill and timeout classification after deadline expiration.
+- **Docker Unavailable Handling:** Verified the engine returns a clean `status: system_error` rather than crashing the server when Docker daemon is down.
+- **Resource Limits & Concurrency:** Tested slot acquisition, queue capacity limits, and path normalization across Windows and Linux.
+- **Workspace Cleanup:** Verified that temporary directories are completely unlinked after execution.
+
+---
+
+## 🔧 Troubleshooting
+
+### 1. "Docker daemon unavailable"
+- Ensure Docker Desktop or Docker Engine is started:
+  ```bash
+  docker info
+  ```
+- If running inside a container, verify that `/var/run/docker.sock` is mounted into the container.
+- If Docker CLI is at a custom path, configure `DOCKER_CMD=/path/to/docker` in `server/.env`.
+
+### 2. First Execution Takes Longer
+- If a language image has not been pulled yet, Docker will download it on first run. Pre-pull images using `docker/pull-runners.sh` or `docker/pull-runners.bat`.
+
+### 3. Java: "Could not find or load main class Main"
+- The Java runner automatically detects your public class name (e.g. `public class Solution` becomes `Solution.java` and runs `java Solution`). Ensure your class contains `public static void main(String[] args)`.
+
+### 4. Memory or Output Limit Exceeded
+- If your program exceeds 256 MB or 5 seconds, configure `CODE_EXEC_MEMORY_LIMIT` or `CODE_EXEC_TIMEOUT_MS` in `server/.env`.
 
 ---
 

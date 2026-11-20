@@ -21,6 +21,7 @@ import sessionRoutes from './routes/sessionRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import skillRoutes from './routes/skillRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import codeRoutes from './routes/codeRoutes.js';
 
 dotenv.config();
 
@@ -70,6 +71,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/skills', skillRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/code', codeRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

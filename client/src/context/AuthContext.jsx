@@ -34,36 +34,51 @@ export const AuthProvider = ({ children }) => {
   }, [token]);
 
   const login = async (emailOrUsername, password) => {
-    const res = await authAPI.login({ emailOrUsername, password });
-    if (res.data.success) {
-      localStorage.setItem('skillswap_token', res.data.token);
-      setToken(res.data.token);
-      setUser(res.data.user);
-      return res.data;
+    try {
+      const res = await authAPI.login({ emailOrUsername, password });
+      if (res.data.success) {
+        localStorage.setItem('skillswap_token', res.data.token);
+        setToken(res.data.token);
+        setUser(res.data.user);
+        return res.data;
+      }
+      throw new Error(res.data.message || 'Login failed');
+    } catch (err) {
+      const message = err.response?.data?.message || err.message || 'Login failed';
+      throw new Error(message);
     }
-    throw new Error(res.data.message || 'Login failed');
   };
 
   const register = async (userData) => {
-    const res = await authAPI.register(userData);
-    if (res.data.success) {
-      localStorage.setItem('skillswap_token', res.data.token);
-      setToken(res.data.token);
-      setUser(res.data.user);
-      return res.data;
+    try {
+      const res = await authAPI.register(userData);
+      if (res.data.success) {
+        localStorage.setItem('skillswap_token', res.data.token);
+        setToken(res.data.token);
+        setUser(res.data.user);
+        return res.data;
+      }
+      throw new Error(res.data.message || 'Registration failed');
+    } catch (err) {
+      const message = err.response?.data?.message || err.message || 'Registration failed';
+      throw new Error(message);
     }
-    throw new Error(res.data.message || 'Registration failed');
   };
 
   const demoLogin = async (username = 'abhishek') => {
-    const res = await authAPI.demoLogin(username);
-    if (res.data.success) {
-      localStorage.setItem('skillswap_token', res.data.token);
-      setToken(res.data.token);
-      setUser(res.data.user);
-      return res.data;
+    try {
+      const res = await authAPI.demoLogin(username);
+      if (res.data.success) {
+        localStorage.setItem('skillswap_token', res.data.token);
+        setToken(res.data.token);
+        setUser(res.data.user);
+        return res.data;
+      }
+      throw new Error(res.data.message || 'Demo login failed');
+    } catch (err) {
+      const message = err.response?.data?.message || err.message || 'Demo login failed';
+      throw new Error(message);
     }
-    throw new Error(res.data.message || 'Demo login failed');
   };
 
   const logout = () => {

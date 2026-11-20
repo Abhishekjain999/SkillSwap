@@ -108,3 +108,9 @@ export const adminAPI = {
   getReports: () => api.get('/admin/reports'),
   resolveReport: (id, data) => api.put(`/admin/reports/${id}`, data),
 };
+
+// Docker Code Execution Engine Endpoints
+export const codeAPI = {
+  execute: (data) => api.post('/code/execute', data),
+  getLanguages: () => api.get('/code/languages'),
+};

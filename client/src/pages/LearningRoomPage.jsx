@@ -29,11 +29,14 @@ import {
   ShieldCheck,
   AlertCircle,
   UploadCloud,
-  Check
+  Check,
+  Terminal,
+  Clock,
+  Loader2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { sessionAPI } from '../services/api';
+import { sessionAPI, codeAPI } from '../services/api';
 import confetti from 'canvas-confetti';
 
 export const LearningRoomPage = () => {
@@ -71,7 +74,19 @@ export const LearningRoomPage = () => {
     '// SkillSwap Collaborative Code Room\nfunction solveProblem() {\n  console.log("Welcome to SkillSwap!");\n}\n\nsolveProblem();\n'
   );
   const [consoleOutput, setConsoleOutput] = useState('');
+  const [customStdin, setCustomStdin] = useState('');
+  const [showStdin, setShowStdin] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [executionResult, setExecutionResult] = useState(null);
   const isLocalCodeChange = useRef(false);
+
+  // Default Language Templates for Clean Switching
+  const languageTemplates = {
+    javascript: '// SkillSwap Collaborative Code Room (Node.js LTS)\nfunction solveProblem() {\n  console.log("Welcome to SkillSwap!");\n}\n\nsolveProblem();\n',
+    python: '# SkillSwap Collaborative Code Room (Python 3.12)\ndef solve_problem():\n    print("Welcome to SkillSwap!")\n\nif __name__ == "__main__":\n    solve_problem()\n',
+    java: '// SkillSwap Collaborative Code Room (OpenJDK 21)\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("Welcome to SkillSwap!");\n    }\n}\n',
+    cpp: '// SkillSwap Collaborative Code Room (C++17 GCC)\n#include <iostream>\n\nint main() {\n    std::cout << "Welcome to SkillSwap!" << std::endl;\n    return 0;\n}\n',
+  };
 
   // Whiteboard Canvas State
   const canvasRef = useRef(null);
@@ -484,37 +499,63 @@ export const LearningRoomPage = () => {
 
   const handleLanguageChange = (newLang) => {
     setEditorLanguage(newLang);
+
+    // If current code is empty or matching a default template, switch to the new template
+    const currentIsDefault = !editorCode.trim() || Object.values(languageTemplates).some(
+      tmpl => tmpl.trim() === editorCode.trim()
+    );
+
+    if (currentIsDefault && languageTemplates[newLang]) {
+      const newTemplate = languageTemplates[newLang];
+      setEditorCode(newTemplate);
+      socket?.emit('code-change', {
+        roomId: sessionId,
+        code: newTemplate,
+        language: newLang,
+      });
+    }
+
     socket?.emit('language-change', {
       roomId: sessionId,
       language: newLang,
     });
   };
 
-  // Run Code in Sandboxed Environment
-  const handleRunCode = () => {
-    setConsoleOutput('Running code in isolated execution sandbox...\n');
+  // Run Code in Sandboxed Docker Environment
+  const handleRunCode = async () => {
+    if (isExecuting) return;
+    setIsExecuting(true);
+    setExecutionResult(null);
+    setConsoleOutput('Provisioning isolated Docker container and running code...\n');
+
     try {
-      if (editorLanguage === 'javascript' || editorLanguage === 'typescript') {
-        let logs = [];
-        const customConsole = {
-          log: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-          error: (...args) => logs.push('[ERROR] ' + args.join(' ')),
-          warn: (...args) => logs.push('[WARN] ' + args.join(' ')),
-        };
+      const res = await codeAPI.execute({
+        language: editorLanguage,
+        code: editorCode,
+        stdin: customStdin,
+      });
 
-        const runFn = new Function('console', editorCode);
-        runFn(customConsole);
+      const data = res.data?.data || res.data;
+      setExecutionResult(data);
 
-        setConsoleOutput(logs.length > 0 ? logs.join('\n') : '(Code executed successfully with no output)');
-      } else {
-        // Multi-language execution sandbox simulator
-        setConsoleOutput(
-          `[${editorLanguage.toUpperCase()} Runner] Compiled successfully.\n` +
-          `Execution output:\n> Hello from SkillSwap Real-Time Sandbox!\n> Exchanged Language: ${editorLanguage}`
-        );
-      }
+      let combined = '';
+      if (data.stdout) combined += data.stdout;
+      if (data.stderr) combined += (combined ? '\n' : '') + data.stderr;
+      if (!combined.trim()) combined = '(Execution completed with no output)';
+      setConsoleOutput(combined);
     } catch (err) {
-      setConsoleOutput(`[Execution Error] ${err.message}`);
+      const errorMsg = err.response?.data?.message || err.message || 'Execution request failed';
+      const failResult = {
+        stdout: '',
+        stderr: `[Execution Error] ${errorMsg}`,
+        exitCode: -1,
+        executionTime: 0,
+        status: 'system_error',
+      };
+      setExecutionResult(failResult);
+      setConsoleOutput(failResult.stderr);
+    } finally {
+      setIsExecuting(false);
     }
   };
 
@@ -918,32 +959,87 @@ export const LearningRoomPage = () => {
                     <select
                       value={editorLanguage}
                       onChange={(e) => handleLanguageChange(e.target.value)}
-                      className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs focus:outline-none"
+                      className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-brand-500"
                     >
-                      <option value="javascript">JavaScript</option>
-                      <option value="typescript">TypeScript</option>
-                      <option value="python">Python</option>
-                      <option value="java">Java</option>
-                      <option value="cpp">C++</option>
-                      <option value="html">HTML</option>
+                      <option value="javascript">JavaScript (Node.js LTS)</option>
+                      <option value="python">Python 3.12</option>
+                      <option value="java">Java (OpenJDK 21)</option>
+                      <option value="cpp">C++ (GCC C++17)</option>
                     </select>
+
+                    <button
+                      onClick={() => setShowStdin(!showStdin)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center space-x-1.5 transition-colors ${
+                        showStdin || customStdin.trim()
+                          ? 'bg-slate-800 text-brand-300 border-brand-500/50'
+                          : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-slate-200'
+                      }`}
+                      title="Provide standard input (stdin) for programs that read inputs"
+                    >
+                      <Terminal className="w-3 h-3 text-brand-400" />
+                      <span>Input (stdin)</span>
+                      {customStdin.trim() && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                      )}
+                    </button>
                   </div>
 
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={handleRunCode}
-                      className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-emerald-500/20"
+                      disabled={isExecuting}
+                      className={`px-3 py-1 rounded-lg font-bold text-xs flex items-center space-x-1.5 shadow-md transition-all ${
+                        isExecuting
+                          ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 active:scale-95'
+                      }`}
                     >
-                      <Play className="w-3 h-3 fill-white" />
-                      <span>Run Code</span>
+                      {isExecuting ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin text-emerald-300" />
+                          <span>Running...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3 h-3 fill-white" />
+                          <span>Run Code</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[300px]">
+                {/* Collapsible Standard Input (stdin) Panel */}
+                {showStdin && (
+                  <div className="px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
+                      <span className="font-semibold flex items-center space-x-1.5">
+                        <Terminal className="w-3.5 h-3.5 text-brand-400" />
+                        <span>Standard Input (stdin)</span>
+                      </span>
+                      {customStdin && (
+                        <button
+                          onClick={() => setCustomStdin('')}
+                          className="text-[10px] text-slate-400 hover:text-slate-200"
+                        >
+                          Clear Input
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={customStdin}
+                      onChange={(e) => setCustomStdin(e.target.value)}
+                      placeholder="Type standard input passed to your program (e.g. input data lines)..."
+                      rows={2}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 font-mono text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand-500/50 resize-y"
+                    />
+                  </div>
+                )}
+
+                <div className="flex-1 min-h-[260px]">
                   <Editor
                     height="100%"
-                    language={editorLanguage}
+                    language={editorLanguage === 'cpp' ? 'cpp' : editorLanguage}
                     value={editorCode}
                     onChange={handleCodeChange}
                     theme="vs-dark"
@@ -958,13 +1054,113 @@ export const LearningRoomPage = () => {
                 </div>
 
                 {/* Console Output Bar */}
-                {consoleOutput && (
-                  <div className="h-32 border-t border-slate-800 bg-slate-950 p-3 font-mono text-xs overflow-y-auto">
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1 pb-1 border-b border-slate-800">
-                      <span>Console Sandbox Output</span>
-                      <button onClick={() => setConsoleOutput('')} className="hover:text-white">Clear</button>
+                {(isExecuting || executionResult || consoleOutput) && (
+                  <div className="h-44 border-t border-slate-800 bg-slate-950 p-3 font-mono text-xs flex flex-col overflow-hidden">
+                    <div className="flex items-center justify-between text-[11px] pb-2 mb-2 border-b border-slate-800/80 shrink-0">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-400 font-semibold flex items-center space-x-1">
+                          <Terminal className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Console Output</span>
+                        </span>
+
+                        {isExecuting && (
+                          <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] flex items-center space-x-1 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            <span>Executing in Docker...</span>
+                          </span>
+                        )}
+
+                        {executionResult && !isExecuting && (
+                          <>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                executionResult.status === 'success'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                  : executionResult.status === 'compilation_error'
+                                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                  : executionResult.status === 'timeout_error'
+                                  ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                                  : 'bg-red-500/20 text-red-400 border-red-500/30'
+                              }`}
+                            >
+                              {executionResult.status === 'success'
+                                ? 'Success'
+                                : executionResult.status === 'compilation_error'
+                                ? 'Compilation Error'
+                                : executionResult.status === 'timeout_error'
+                                ? 'Timeout'
+                                : executionResult.status === 'runtime_error'
+                                ? 'Runtime Error'
+                                : 'System Error'}
+                            </span>
+
+                            {executionResult.executionTime !== undefined && (
+                              <span className="text-[10px] text-slate-400 flex items-center space-x-1">
+                                <Clock className="w-3 h-3 text-slate-500" />
+                                <span>{executionResult.executionTime} ms</span>
+                              </span>
+                            )}
+
+                            {executionResult.exitCode !== undefined && (
+                              <span className="text-[10px] text-slate-500">
+                                (code {executionResult.exitCode})
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setConsoleOutput('');
+                          setExecutionResult(null);
+                        }}
+                        className="text-[10px] text-slate-400 hover:text-white transition-colors"
+                      >
+                        Clear
+                      </button>
                     </div>
-                    <pre className="text-emerald-400 whitespace-pre-wrap">{consoleOutput}</pre>
+
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                      {isExecuting && (
+                        <div className="text-slate-400 italic flex items-center space-x-2 py-1">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                          <span>Provisioning container and running code in isolated environment...</span>
+                        </div>
+                      )}
+
+                      {!isExecuting && executionResult && (
+                        <>
+                          {executionResult.stdout && (
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Standard Output</div>
+                              <pre className="text-emerald-400 whitespace-pre-wrap">{executionResult.stdout}</pre>
+                            </div>
+                          )}
+
+                          {executionResult.stderr && (
+                            <div className="mt-1">
+                              <div className="text-[10px] text-red-400/80 uppercase tracking-wider mb-0.5">
+                                {executionResult.status === 'compilation_error' ? 'Compilation Diagnostics' : 'Standard Error'}
+                              </div>
+                              <pre className="text-red-400 whitespace-pre-wrap bg-red-950/20 border border-red-900/40 p-2 rounded-lg">
+                                {executionResult.stderr}
+                              </pre>
+                            </div>
+                          )}
+
+                          {!executionResult.stdout && !executionResult.stderr && (
+                            <p className="text-slate-500 italic text-[11px]">
+                              (Process exited with code {executionResult.exitCode} and produced no output)
+                            </p>
+                          )}
+                        </>
+                      )}
+
+                      {!isExecuting && !executionResult && consoleOutput && (
+                        <pre className="text-emerald-400 whitespace-pre-wrap">{consoleOutput}</pre>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

@@ -1,0 +1,72 @@
+services:
+  # SkillSwap Node.js Backend API & Socket Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: skillswap-server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongo:27017/skillswap
+      - CLIENT_URL=http://localhost:5173
+      - JWT_SECRET=skillswap_super_secret_jwt_key_2026_xyz
+      - JWT_EXPIRE=30d
+      - NODE_ENV=production
+      - CODE_EXEC_TIMEOUT_MS=5000
+      - CODE_EXEC_MEMORY_LIMIT=256m
+      - CODE_EXEC_CPU_LIMIT=1.0
+      - CODE_EXEC_PIDS_LIMIT=64
+      - DOCKER_CMD=docker
+      - DOCKER_NETWORK=none
+      - CODE_EXEC_TEMP_DIR=/tmp/skillswap-code-exec
+    volumes:
+      # Sibling Docker Container Pattern: communicates with host daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      - shared-exec-temp:/tmp/skillswap-code-exec
+      - server-uploads:/app/uploads
+    depends_on:
+      - mongo
+    networks:
+      - skillswap-network
+
+  # SkillSwap React + Vite Frontend Client
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: skillswap-client
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+    networks:
+      - skillswap-network
+
+  # MongoDB Database
+  mongo:
+    image: mongo:7.0
+    container_name: skillswap-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - skillswap-network
+
+volumes:
+  mongo-data:
+    name: skillswap_mongo_data
+  server-uploads:
+    name: skillswap_server_uploads
+  shared-exec-temp:
+    name: skillswap_exec_temp
+
+networks:
+  skillswap-network:
+    name: skillswap_network
+    driver: bridge
