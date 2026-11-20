@@ -41,10 +41,9 @@ services:
   # ----------------------------------------------------------------------------
   # 2. Frontend Single Page Application (React 18 + Vite + Tailwind CSS)
   # ----------------------------------------------------------------------------
-  - type: web
+ - type: web
     name: skillswap-client
     runtime: static
-    plan: free
     branch: main
     rootDir: client
     buildCommand: npm install && VITE_API_URL="${VITE_SOCKET_URL}/api" npm run build
