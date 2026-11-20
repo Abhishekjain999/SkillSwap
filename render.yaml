@@ -1,0 +1,65 @@
+# ==============================================================================
+# Render Blueprint Specification for SkillSwap
+# Docs: https://render.com/docs/blueprint-spec
+# ==============================================================================
+version: "1"
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Backend API & WebSocket Server (Node.js + Express + Socket.IO)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: skillswap-server
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRE
+        value: 30d
+      - key: CLIENT_URL
+        fromService:
+          type: web
+          name: skillswap-client
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # ----------------------------------------------------------------------------
+  # 2. Frontend Single Page Application (React 18 + Vite + Tailwind CSS)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: skillswap-client
+    runtime: static
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: client
+    buildCommand: npm install && VITE_API_URL="${VITE_SOCKET_URL}/api" npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: VITE_SOCKET_URL
+        fromService:
+          type: web
+          name: skillswap-server
+          envVarKey: RENDER_EXTERNAL_URL
